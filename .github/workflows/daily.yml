@@ -1,0 +1,64 @@
+name: daily-crsec
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每日 02:00 UTC（可按需修改）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Microsoft Edge (stable)
+        run: |
+          sudo apt update
+          sudo apt install -y wget gnupg apt-transport-https ca-certificates
+          wget -q -O - https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge.list'
+          sudo apt update
+          sudo apt install -y microsoft-edge-stable
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor script
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python monitor_edge.py
+
+      - name: Publish to gh-pages (commit index.html & history)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 切换或创建 gh-pages 分支
+          git checkout -B gh-pages
+          # 把输出文件重命名为 index.html（GitHub Pages 默认）
+          if [ -f index.html ]; then
+            git add index.html
+          fi
+          if [ -f history.txt ]; then
+            git add history.txt
+          fi
+          git commit -m "Update status: $(date -u +"%Y-%m-%d")" || echo "no changes to commit"
+          git push -u origin gh-pages --force
