@@ -1,8 +1,8 @@
-name: daily-crsec
+name: weekly-crsec
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每日 02:00 UTC（可按需修改）
+    - cron: '0 2 * * 6'  # UTC（可按需修改）
   workflow_dispatch:     # 允许手动触发
 
 permissions:
