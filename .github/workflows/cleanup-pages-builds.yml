@@ -2,7 +2,7 @@ name: Cleanup Pages Build Records
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # 每周清理一次
+    - cron: '0 3 * * 3'  # 每周清理一次
   workflow_dispatch:
 
 jobs:
@@ -108,4 +108,3 @@ jobs:
               // 重新抛出错误，让工作流标记为失败
               throw error;
             }
-          result-encoding: string
