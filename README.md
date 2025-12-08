@@ -1,6 +1,4 @@
-# crsec-monitor
-
-每周获取国新证券通达信行情交易软件的更新
+A tool that sends weekly CRSEC trading software update notifications via email
 
 <p align="center">
 <pre>
