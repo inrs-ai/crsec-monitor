@@ -1,7 +1,6 @@
 # monitor_edge.py
 # 说明：在 GitHub Actions 上使用 Selenium + Edge 抓取目标页面并生成 index.html 与 history.txt
-# 要求：Actions 的运行器需安装 Edge 或脚本中安装 Edge（你的 workflow 已包含安装步骤）
-# 注意：不要在日志中打印 secrets
+# 修正版：增加了窗口大小设置、User-Agent伪装及更强的元素定位逻辑
 
 import os
 import time
@@ -19,7 +18,7 @@ from email.message import EmailMessage
 URL = "https://www.crsec.com.cn/link/download.html"
 TARGET = "国新证券通达信行情交易软件"
 
-# 邮件配置（在 Actions 中通过 Secrets 注入环境变量）
+# 邮件配置
 SMTP_HOST = os.getenv("SMTP_HOST")
 SMTP_PORT = int(os.getenv("SMTP_PORT") or 0)
 SMTP_USER = os.getenv("SMTP_USER")
@@ -41,7 +40,6 @@ def send_email(subject: str, body: str):
         msg["From"] = EMAIL_FROM
         msg["To"] = EMAIL_TO
 
-        # 465 -> SSL, 其他常用 587 -> STARTTLS
         if SMTP_PORT == 465:
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=30) as s:
@@ -54,7 +52,6 @@ def send_email(subject: str, body: str):
                     s.starttls(context=ssl.create_default_context())
                     s.ehlo()
                 except Exception:
-                    # 如果 STARTTLS 不支持，继续尝试登录（某些服务器在非加密端口上允许明文）
                     pass
                 s.login(SMTP_USER, SMTP_PASS)
                 s.send_message(msg)
@@ -70,183 +67,106 @@ def safe_text(el):
 
 def extract_update_from_row(el):
     """
-    接受一个元素（理想为 <tr> 或包含单元格的容器），尝试定位“更新时间”列或匹配日期字符串并返回文本。
-    返回 None 表示未能提取。
+    尝试从元素（行或容器）中提取日期
     """
     try:
-        # 确保我们有一个容器（tr 或可回溯到 tr）
+        # 1. 尝试直接在文本中正则匹配日期
+        all_text = safe_text(el)
+        # 匹配 YYYY-MM-DD 或 YYYY/MM/DD 或 YYYY年MM月DD日
+        date_pattern = r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}"
+        dates = re.findall(date_pattern, all_text)
+        if dates:
+            # 返回找到的第一个日期
+            return dates[0]
+
+        # 2. 如果没找到，尝试按列遍历 (针对标准表格)
         tag = el.tag_name.lower()
-        if tag != "tr":
-            try:
-                tr = el.find_element(By.XPATH, "./ancestor::tr")
-            except Exception:
-                tr = el  # 退回到传入元素作为容器
-        else:
-            tr = el
-
-        # 尝试找到包含表头的 table
-        table = None
-        try:
-            table = tr.find_element(By.XPATH, "./ancestor::table")
-        except Exception:
-            table = None
-
-        # 如果有表头，尝试根据表头索引定位更新时间列
-        if table:
-            headers = table.find_elements(By.XPATH, ".//th")
-            header_texts = [safe_text(h) for h in headers]
-            idx = None
-            for i, t in enumerate(header_texts):
-                if "更新时间" in t or "更新" in t or "时间" == t:
-                    idx = i
-                    break
-            tds = tr.find_elements(By.TAG_NAME, "td")
-            if idx is not None and idx < len(tds):
-                return safe_text(tds[idx])
-
-        # 兜底：在当前容器的 td 中查找包含“更新时间”或日期格式的文本
+        tr = el if tag == "tr" else el.find_element(By.XPATH, "./ancestor::tr")
         tds = tr.find_elements(By.TAG_NAME, "td")
         for td in tds:
             txt = safe_text(td)
-            if "更新时间" in txt:
+            if re.search(date_pattern, txt):
                 return txt
-            if re.search(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}", txt):
-                return txt
-
-        # 再兜底：在容器内全文本中找日期
-        all_text = safe_text(tr)
-        m = re.search(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}", all_text)
-        if m:
-            return m.group(0)
-
-        # 最后返回整行拼接文本作为可读输出
-        if tds:
-            return " | ".join([safe_text(td) for td in tds if safe_text(td)])
-        return all_text or None
-    except Exception as e:
-        print("extract_update_from_row 异常:", e)
+        
         return None
-
-def try_switch_to_frame_containing_text(driver, text, timeout=2):
-    """
-    遍历页面 iframe，尝试切换到包含指定文本的 frame。
-    成功返回 True 并保持在该 frame；失败返回 False 并保持原 frame。
-    """
-    try:
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for i, fr in enumerate(iframes):
-            try:
-                driver.switch_to.frame(fr)
-                time.sleep(0.3)
-                if text in driver.page_source:
-                    return True
-                driver.switch_to.default_content()
-            except Exception:
-                # 切换失败则继续
-                try:
-                    driver.switch_to.default_content()
-                except Exception:
-                    pass
-        return False
-    except Exception:
-        try:
-            driver.switch_to.default_content()
-        except Exception:
-            pass
-        return False
+    except Exception as e:
+        print(f"extract_update_from_row 异常: {e}")
+        return None
 
 def fetch_once():
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-gpu")
-    # 可根据需要添加 user-agent 或其他参数
+    # --- 关键修正 1: 设置大分辨率，确保加载桌面版页面布局 ---
+    opts.add_argument("--window-size=1920,1080")
+    # --- 关键修正 2: 添加 User-Agent 防止被识别为爬虫拒绝服务 ---
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
+    
     driver = webdriver.Edge(options=opts)
+    updated_text = None
+    
     try:
+        print(f"正在访问: {URL}")
         driver.set_page_load_timeout(60)
         driver.get(URL)
 
         wait = WebDriverWait(driver, 20)
+        
+        # --- 关键修正 3: 等待特定目标文本出现，而不仅仅是 body ---
+        # 尝试查找包含 "通达信" 的元素，确保内容已动态加载
         try:
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            print("等待页面内容加载...")
+            wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '通达信')]")))
+            print("检测到关键文本，页面已渲染。")
         except Exception:
-            print("页面主体未在超时内加载，继续尝试抓取")
+            print("未直接检测到关键词，尝试继续解析...")
 
-        # 尝试点击“电脑版”（若存在）
-        try:
-            el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.LINK_TEXT, "电脑版")))
-            el.click()
-            time.sleep(1.0)
-        except Exception:
-            try:
-                el = driver.find_element(By.XPATH, "//*[contains(text(),'电脑版')]")
-                el.click()
-                time.sleep(1.0)
-            except Exception:
-                # 忽略，继续
-                pass
+        # 截图调试
+        driver.save_screenshot("debug_screenshot.png")
+        with open("debug_source.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
 
-        # 保存调试产物（Actions 会保留工作区文件，可作为工件上传）
-        try:
-            with open("page_source.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
-            driver.save_screenshot("page_screenshot.png")
-            print("已保存 page_source.html 与 page_screenshot.png")
-        except Exception as e:
-            print("保存调试文件失败:", e)
+        # 定位逻辑优化
+        # 使用 normalize-space 忽略 HTML 源码中的换行和多余空格
+        # 策略 A: 查找包含 TARGET 的 tr
+        target_rows = driver.find_elements(By.XPATH, f"//tr[contains(normalize-space(.), '{TARGET}')]")
+        
+        if target_rows:
+            print(f"找到 {len(target_rows)} 个包含目标的表格行")
+            for row in target_rows:
+                res = extract_update_from_row(row)
+                if res:
+                    updated_text = res
+                    break
+        
+        # 策略 B: 如果表格定位失败，全局查找包含 TARGET 的元素，然后找其附近的日期
+        if not updated_text:
+            print("策略 A 未找到日期，尝试策略 B (相邻查找)...")
+            # 找到包含名字的元素
+            elements = driver.find_elements(By.XPATH, f"//*[contains(normalize-space(.), '{TARGET}')]")
+            for el in elements:
+                # 尝试找父级 tr
+                try:
+                    parent_tr = el.find_element(By.XPATH, "./ancestor::tr")
+                    res = extract_update_from_row(parent_tr)
+                    if res: 
+                        updated_text = res
+                        break
+                except:
+                    continue
 
-        # 如果目标文本在 iframe 中，切换到包含该文本的 frame
-        try:
-            if TARGET not in driver.page_source:
-                switched = try_switch_to_frame_containing_text(driver, TARGET)
-                if switched:
-                    print("已切换到包含目标文本的 iframe")
-        except Exception:
-            pass
+        if not updated_text:
+            updated_text = "未找到日期 (Parsed None)"
+            print("警告: 页面已加载但未能提取到日期格式")
 
-        updated_text = None
-        try:
-            # 优先：直接定位包含目标文本的 tr
-            xpath_tr = f"//tr[.//text()[contains(., '{TARGET}')]]"
-            rows = driver.find_elements(By.XPATH, xpath_tr)
-            if rows:
-                updated_text = extract_update_from_row(rows[0])
-            else:
-                # 其次：查找 td 包含目标文本
-                td_xpath = f"//td[contains(normalize-space(.), '{TARGET}')]"
-                tds = driver.find_elements(By.XPATH, td_xpath)
-                if tds:
-                    # 上溯到 tr
-                    try:
-                        tr = tds[0].find_element(By.XPATH, "./ancestor::tr")
-                        updated_text = extract_update_from_row(tr)
-                    except Exception:
-                        updated_text = extract_update_from_row(tds[0])
-                else:
-                    # 最后：全局查找任意包含目标文本的元素并尝试多种 ancestor
-                    elems = driver.find_elements(By.XPATH, f"//*[contains(normalize-space(.), '{TARGET}')]")
-                    if elems:
-                        e = elems[0]
-                        for anc in ("ancestor::tr", "ancestor::td", "ancestor::li", "ancestor::div"):
-                            try:
-                                parent = e.find_element(By.XPATH, f"./{anc}")
-                                updated_text = extract_update_from_row(parent)
-                                if updated_text:
-                                    break
-                            except Exception:
-                                continue
-                    else:
-                        raise Exception("页面中未找到包含目标文本的元素")
-        except Exception as e:
-            print("未能定位到目标软件行:", e)
-            updated_text = f"抓取失败: {e}"
-
-        return updated_text
+    except Exception as e:
+        print("抓取过程发生异常:", e)
+        updated_text = f"Error: {str(e)}"
     finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        driver.quit()
+
+    return updated_text
 
 def read_history():
     if not os.path.exists(HISTORY_FILE):
@@ -263,20 +183,29 @@ def build_html(value, history):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     html = f"""<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>国新证券 更新时间监控</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>国新证券 更新时间监控</title>
+    <style>
+        body {{ font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }}
+        pre {{ background: #f4f4f4; padding: 10px; border-radius: 5px; }}
+        .latest {{ color: #2e7d32; font-weight: bold; }}
+    </style>
+</head>
 <body>
   <h2>国新证券 通达信行情交易软件 更新时间监控</h2>
   <p><strong>抓取时间（UTC）</strong>: {now}</p>
   <p><strong>当前抓取结果</strong>:</p>
-  <pre>{value}</pre>
+  <pre class="latest">{value}</pre>
   <h3>历史（最近 50 条）</h3>
   <ul>
 """
-    for line in history[-50:]:
+    # 倒序显示，最新的在上面
+    for line in reversed(history[-50:]):
         html += f"    <li>{line}</li>\n"
     html += """
   </ul>
-  <p>由 GitHub Actions 每日自动更新并发布到 GitHub Pages。</p>
+  <p style="font-size:0.8em; color:#666;">由 GitHub Actions 每日自动更新并发布到 GitHub Pages。</p>
 </body>
 </html>
 """
@@ -285,14 +214,31 @@ def build_html(value, history):
 def main():
     value = fetch_once()
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    entry = f"{now} — {value}"
+    
+    # 简单的去重逻辑：如果抓取失败(Error或None)，尽量不要覆盖历史，或者单独记录
+    # 这里假设 value 只要不是 None 就记录
+    if value and "Error" not in value and "Parsed None" not in value:
+        entry = f"{now} — {value}"
+    else:
+        entry = f"{now} — [抓取异常] {value}"
+
     history = read_history()
+    
+    # 只有当最新的有效记录不同时才发邮件 (避免重复报错刷屏)
+    # 这里简化为：只要内容变了就记录
     last = history[-1] if history else None
+    
+    # 如果本次是异常，且上次也是异常，可能就不需要重复写了？
+    # 简单起见，这里总是写入文件，但可以控制发邮件逻辑
     if last != entry:
         append_history(entry)
-        subject = "国新证券软件下载 更新时间变更"
-        body = f"检测到变更\n时间: {now}\n新值: {value}\n来源: {URL}"
-        send_email(subject, body)
+        # 只有抓取成功且变化时才发邮件，或者你可以选择异常也发
+        if "抓取异常" not in entry:
+            subject = "国新证券软件下载 更新时间变更"
+            body = f"检测到变更\n时间: {now}\n新值: {value}\n来源: {URL}"
+            send_email(subject, body)
+    
+    # 重新读取用于生成 HTML
     history = read_history()
     html = build_html(value, history)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -301,4 +247,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
