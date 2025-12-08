@@ -1,0 +1,70 @@
+# .github/workflows/cleanup-pages-builds.yml
+name: Cleanup Pages Build Records
+
+on:
+  schedule:
+    - cron: '0 3 * * 3'  # 每周清理一次
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List all workflows to find the correct ID
+        run: |
+          gh workflow list
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Cleanup old pages-build-deployment runs
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // 方法1：通过名称查找工作流ID（更准确）
+            const workflows = await github.rest.actions.listWorkflowsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            
+            const pagesWorkflow = workflows.data.workflows.find(
+              wf => wf.name === 'pages-build-deployment' || 
+                    wf.path.includes('pages-build-deployment')
+            );
+            
+            if (!pagesWorkflow) {
+              console.log('pages-build-deployment workflow not found');
+              return;
+            }
+            
+            console.log(`Found workflow: ${pagesWorkflow.name} with ID: ${pagesWorkflow.id}`);
+            
+            // 获取所有运行记录，按时间排序（最新的在前）
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: pagesWorkflow.id,
+              per_page: 100
+            });
+            
+            // 保留最近5个运行记录
+            const runsToKeep = 5;
+            const runsToDelete = runs.data.workflow_runs.slice(runsToKeep);
+            
+            console.log(`Total runs: ${runs.data.workflow_runs.length}`);
+            console.log(`Keeping ${runsToKeep} runs, deleting ${runsToDelete.length} runs`);
+            
+            // 删除旧的运行记录
+            for (const run of runsToDelete) {
+              console.log(`Deleting run ${run.id} from ${run.created_at}`);
+              
+              try {
+                await github.rest.actions.deleteWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+                console.log(`✓ Deleted run ${run.id}`);
+              } catch (error) {
+                console.log(`✗ Failed to delete run ${run.id}: ${error.message}`);
+              }
+            }
