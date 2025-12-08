@@ -5,7 +5,7 @@
 <p align="center">
 <pre>
    (__)
-   (oo)   小牛犊
+   (oo) 
   //||\\
    ^^ ^^
 </pre>
