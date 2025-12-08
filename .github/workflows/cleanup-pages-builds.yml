@@ -22,9 +22,11 @@ jobs:
             try {
               // 1. 获取所有工作流
               console.log('获取仓库工作流列表...');
-              const workflows = await github.rest.actions.listWorkflowsForRepo({
+              const workflows = await github.rest.actions.listRepoWorkflows({
                 owner: context.repo.owner,
                 repo: context.repo.repo
+              });
+
               });
               
               console.log(`找到 ${workflows.data.total_count} 个工作流`);
