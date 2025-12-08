@@ -76,99 +76,126 @@ def fetch_once():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
-    
+    opts.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0"
+    )
+
     driver = webdriver.Edge(options=opts)
     updated_text = None
-    
+
     try:
         print(f"正在访问: {URL}")
         driver.set_page_load_timeout(60)
         driver.get(URL)
-        wait = WebDriverWait(driver, 15)
+        wait = WebDriverWait(driver, 20)
 
-        # --- 步骤 1: 尝试点击 "电脑版" 标签 ---
+        # 1. 点击“电脑版”标签
         try:
             print("正在寻找并点击 '电脑版' 标签...")
-            # 寻找包含 "电脑版" 字样的可点击元素 (li, div, span, a)
             tab_xpath = "//*[contains(text(), '电脑版') and (self::li or self::div or self::span or self::a)]"
             tab_element = wait.until(EC.element_to_be_clickable((By.XPATH, tab_xpath)))
-            
-            # 点击标签
             driver.execute_script("arguments[0].click();", tab_element)
-            time.sleep(2) # 等待内容切换动画完成
+            # 等待“电脑版”内容真正渲染，可以等待目标字样或某个容器出现
+            time.sleep(2)
             print("已点击 '电脑版' 标签")
         except Exception as e:
             print(f"警告: 未能找到或点击 '电脑版' 标签，尝试直接解析 (可能已是默认页): {e}")
 
-        # --- 步骤 2: 等待目标软件名称出现 ---
-        print(f"正在定位目标软件: {TARGET}")
-        # 这里使用 presence 即可，稍后我们用 JS 获取内容以防 display 问题
-        target_el = wait.until(EC.presence_of_element_located((By.XPATH, f"//*[contains(text(), '{TARGET}')]")))
-        
-        # --- 步骤 3: 智能提取日期 ---
-        # 策略 A: 找到目标元素的父级容器（可能是 tr 也可能是 div），获取整行文本
-        print("找到目标元素，正在解析日期...")
-        
-        # 获取包含目标文本的元素
-        target_elements = driver.find_elements(By.XPATH, f"//*[contains(text(), '{TARGET}')]")
-        
+        # 2. 优先通过“更新时间：”定位（更稳定）
+        print("正在寻找包含 '更新时间' 的元素...")
+        try:
+            # 等待页面任意位置出现“更新时间”
+            update_label = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(text(), '更新时间')]")
+                )
+            )
+        except Exception as e:
+            print("未能定位到包含 '更新时间' 的元素:", e)
+            update_label = None
+
         found_date = None
-        
-        for el in target_elements:
-            # 向上找两层，通常能涵盖整个行信息 (tr 或者 div-row)
-            # 尝试 1: 直接找最近的 tr
+
+        if update_label:
+            # 尝试：拿该节点及其父节点一整块文本
             try:
-                row = el.find_element(By.XPATH, "./ancestor::tr")
-                # 优先使用 textContent，因为它能获取到即使是隐藏样式的文本（有些网页懒加载会导致 .text 为空）
-                row_text = row.get_attribute("textContent") 
-                found_date = extract_date_from_text(row_text)
-                if found_date:
-                    print(f"策略 A (Table) 成功: {found_date}")
-                    break
-            except:
-                pass
-
-            # 尝试 2: 如果不是表格，找父级 div/ul
-            if not found_date:
-                try:
-                    # 获取父级文本
-                    parent = el.find_element(By.XPATH, "./..")
-                    parent_text = parent.get_attribute("textContent")
-                    found_date = extract_date_from_text(parent_text)
-                    
-                    # 如果父级没找到，再找父级的父级 (爷爷级)
-                    if not found_date:
-                        grandparent = el.find_element(By.XPATH, "./../..")
-                        grandparent_text = grandparent.get_attribute("textContent")
-                        found_date = extract_date_from_text(grandparent_text)
-                    
-                    if found_date:
-                        print(f"策略 B (Div/List) 成功: {found_date}")
+                block = update_label
+                for _ in range(3):  # 最多向上 3 层，找一块较大的文字区域
+                    parent = block.find_element(By.XPATH, "./..")
+                    if not parent:
                         break
-                except:
+                    block = parent
+
+                block_text = block.get_attribute("textContent") or ""
+                print("包含 '更新时间' 的块文本:", block_text[:200])
+                found_date = extract_date_from_text(block_text)
+                if found_date:
+                    print("通过 '更新时间' 块提取日期成功:", found_date)
+            except Exception as e:
+                print("通过 '更新时间' 块提取日期失败:", e)
+
+        # 3. 如果还没找到，再退回到你原来的“按软件名搜索 + 行文本”策略
+        if not found_date:
+            print(f"回退：按软件名 '{TARGET}' 搜索行文本提取日期...")
+            target_elements = driver.find_elements(By.XPATH, f"//*[contains(text(), '{TARGET}')]")
+
+            for el in target_elements:
+                # 先找最近的 tr
+                try:
+                    row = el.find_element(By.XPATH, "./ancestor::tr")
+                    row_text = row.get_attribute("textContent") or ""
+                    found_date = extract_date_from_text(row_text)
+                    if found_date:
+                        print(f"策略 A (Table) 成功: {found_date}")
+                        break
+                except Exception:
                     pass
-        
-        updated_text = found_date
 
-        # --- 步骤 4: 终极兜底 (如果精确定位失败) ---
-        if not updated_text:
-            print("精确定位失败，尝试全页搜索...")
-            # 获取整个 body 的文本
-            body_text = driver.find_element(By.TAG_NAME, "body").get_attribute("innerText")
-            # 截取目标文字附近的内容 (前后 200 字符)
-            idx = body_text.find(TARGET)
+                # 再尝试父 div/ul
+                if not found_date:
+                    try:
+                        parent = el.find_element(By.XPATH, "./..")
+                        parent_text = parent.get_attribute("textContent") or ""
+                        found_date = extract_date_from_text(parent_text)
+
+                        if not found_date:
+                            grandparent = el.find_element(By.XPATH, "./../..")
+                            grandparent_text = grandparent.get_attribute("textContent") or ""
+                            found_date = extract_date_from_text(grandparent_text)
+
+                        if found_date:
+                            print(f"策略 B (Div/List) 成功: {found_date}")
+                            break
+                    except Exception:
+                        pass
+
+        # 4. 终极兜底：在整页文本里以“更新时间”附近截取
+        if not found_date:
+            print("精确定位失败，尝试全页搜索 '更新时间'...")
+            body_text = driver.find_element(By.TAG_NAME, "body").get_attribute("innerText") or ""
+            idx = body_text.find("更新时间")
+            snippet = ""
             if idx != -1:
-                snippet = body_text[idx:idx+300] # 往后找 300 字符
-                updated_text = extract_date_from_text(snippet)
-                if updated_text:
-                    print(f"策略 C (全页片段匹配) 成功: {updated_text}")
+                # 从“更新时间”处向后截取一段文本
+                snippet = body_text[idx:idx + 200]
+            else:
+                # 找不到“更新时间”，就退回到按软件名附近截取
+                idx = body_text.find(TARGET)
+                if idx != -1:
+                    snippet = body_text[idx:idx + 300]
 
-        if not updated_text:
+            print("截取片段:", snippet[:200])
+            found_date = extract_date_from_text(snippet)
+            if found_date:
+                print("策略 C (全页片段匹配) 成功:", found_date)
+
+        if not found_date:
             updated_text = "未找到日期 (Parsed None)"
-            # 保存截图以供调试
             driver.save_screenshot("debug_failed.png")
             print("警告: 即使在全页搜索后也未找到日期。")
+        else:
+            updated_text = found_date
 
     except Exception as e:
         print("抓取过程发生异常:", e)
@@ -177,6 +204,7 @@ def fetch_once():
         driver.quit()
 
     return updated_text
+
 
 def read_history():
     if not os.path.exists(HISTORY_FILE):
@@ -249,3 +277,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
+上述代码是部署在GitHub上获取的https://www.crsec.com.cn/link/download.html中“电脑版”的国新证券通达信行情交易软件的更新日期，但是未能成功，页面提示：
+
+当前抓取结果:
+未找到日期 (Parsed None)
+历史（最近 50 条）
+    2025-12-08 08:51:15 UTC — [抓取异常] 未找到日期 (Parsed None)
+
+但https://www.crsec.com.cn/link/download.html页面中点击“电脑版”后，可以看到“更新时间：2025-09-19”字样。
+
+
+请修改代码。 
