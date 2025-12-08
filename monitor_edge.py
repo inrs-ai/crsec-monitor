@@ -95,23 +95,22 @@ def fetch_once():
         print(f"正在访问: {URL}")
         driver.set_page_load_timeout(60)
         driver.get(URL)
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 20)  # 增加等待时间
 
-        # 保存初始页面截图
+        # 保存初始页面截图用于调试
         driver.save_screenshot("page_load.png")
         print("初始页面已截图: page_load.png")
 
-        # --- 查找并点击 "电脑版" 标签 ---
+        # --- 步骤 1: 找到并点击 "电脑版" 标签 ---
         print("正在寻找 '电脑版' 标签...")
         
-        # 尝试多种方式找到电脑版标签
+        # 方法1: 尝试多种方式找到电脑版标签
         tab_selectors = [
-            "//div[contains(text(), '电脑版')]",
+            "//div[@class='tab-item' and contains(text(), '电脑版')]",
             "//li[contains(text(), '电脑版')]",
             "//a[contains(text(), '电脑版')]",
             "//span[contains(text(), '电脑版')]",
             "//*[contains(@class, 'tab') and contains(text(), '电脑版')]",
-            "//button[contains(text(), '电脑版')]",
             "//*[@id='tab-pc']",
             "//*[contains(@onclick, 'pc') or contains(@onclick, 'computer')]"
         ]
@@ -122,11 +121,11 @@ def fetch_once():
                 tab_element = driver.find_element(By.XPATH, selector)
                 print(f"找到电脑版标签: {selector}")
                 
-                # 滚动到元素
-                driver.execute_script("arguments[0].scrollIntoView();", tab_element)
+                # 滚动到元素并高亮显示
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", tab_element)
                 time.sleep(1)
                 
-                # 使用JavaScript点击
+                # 使用JavaScript点击，更可靠
                 driver.execute_script("arguments[0].click();", tab_element)
                 print("已点击电脑版标签")
                 tab_found = True
@@ -142,98 +141,130 @@ def fetch_once():
         driver.save_screenshot("after_tab_click.png")
         print("点击后页面已截图: after_tab_click.png")
 
-        # --- 查找目标软件和日期 ---
+        # --- 步骤 2: 查找目标软件 ---
         print(f"正在查找目标软件: {TARGET}")
         
-        # 方法1: 直接在整个页面中搜索"更新时间"
-        print("方法1: 搜索包含'更新时间'的元素")
-        time_elements = driver.find_elements(By.XPATH, "//*[contains(text(), '更新时间')]")
-        print(f"找到 {len(time_elements)} 个包含'更新时间'的元素")
+        # 先获取页面源代码查看结构
+        page_source = driver.page_source[:5000]  # 获取前5000字符用于调试
+        print("页面源代码片段:", page_source)
         
-        for i, elem in enumerate(time_elements):
-            text = elem.text
-            print(f"  元素{i+1}: {text}")
-            date_match = extract_date_from_text(text)
-            if date_match:
-                updated_text = date_match
-                print(f"从元素中找到日期: {updated_text}")
-                break
-        
-        # 方法2: 搜索所有包含日期格式的文本
-        if not updated_text:
-            print("\n方法2: 搜索所有日期格式的文本")
-            all_text = driver.find_element(By.TAG_NAME, "body").text
-            print(f"页面总文本长度: {len(all_text)}")
+        # 查找所有包含目标软件名称的元素
+        try:
+            # 使用更宽松的匹配
+            target_elements = driver.find_elements(By.XPATH, f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{TARGET.lower()}')]")
             
-            # 查找所有可能的日期
-            date_pattern = r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}"
-            all_dates = re.findall(date_pattern, all_text)
-            print(f"找到所有日期: {all_dates}")
+            if not target_elements:
+                # 尝试部分匹配
+                target_elements = driver.find_elements(By.XPATH, "//*[contains(text(), '国新证券') or contains(text(), '通达信')]")
             
-            if all_dates:
-                updated_text = all_dates[0]
-                print(f"从页面文本中提取到日期: {updated_text}")
-        
-        # 方法3: 查找目标软件附近的文本
-        if not updated_text:
-            print("\n方法3: 查找目标软件附近的文本")
-            try:
-                # 查找包含目标软件名称的元素
-                target_elements = driver.find_elements(By.XPATH, f"//*[contains(text(), '国新证券') or contains(text(), '通达信')]")
-                print(f"找到 {len(target_elements)} 个相关元素")
-                
-                for i, elem in enumerate(target_elements[:10]):  # 只检查前10个
-                    # 获取元素及其周围的文本
+            print(f"找到 {len(target_elements)} 个匹配元素")
+            
+            for i, element in enumerate(target_elements):
+                try:
+                    element_html = element.get_attribute('outerHTML')
+                    element_text = element.text
+                    print(f"元素{i+1}: {element_text[:100]}")
+                    print(f"HTML片段: {element_html[:200]}")
+                    
+                    # 获取父元素和祖先元素的文本
+                    parent = element.find_element(By.XPATH, "./..")
+                    parent_text = parent.text if parent else ""
+                    
+                    # 获取整个行的文本（如果是表格行）
                     try:
-                        # 获取父元素
-                        parent = elem.find_element(By.XPATH, "./..")
-                        parent_text = parent.text[:200]  # 只取前200字符
-                        print(f"元素{i+1}的父元素文本: {parent_text}")
+                        row = element.find_element(By.XPATH, "./ancestor::tr")
+                        row_text = row.text if row else ""
+                        print(f"行文本: {row_text}")
                         
-                        date_match = extract_date_from_text(parent_text)
-                        if date_match:
+                        # 在行文本中查找更新时间
+                        if row_text:
+                            # 查找"更新"或"时间"关键字
+                            if "更新" in row_text or "时间" in row_text:
+                                date_match = extract_date_from_text(row_text)
+                                if date_match:
+                                    updated_text = date_match
+                                    print(f"从行文本中找到日期: {updated_text}")
+                                    break
+                    except:
+                        pass
+                    
+                    # 如果没有找到，查找兄弟元素中的时间
+                    try:
+                        siblings = parent.find_elements(By.XPATH, "./*")
+                        for sibling in siblings:
+                            sibling_text = sibling.text
+                            if "更新" in sibling_text or "时间" in sibling_text:
+                                date_match = extract_date_from_text(sibling_text)
+                                if date_match:
+                                    updated_text = date_match
+                                    print(f"从兄弟元素中找到日期: {updated_text}")
+                                    break
+                    except:
+                        pass
+                    
+                except Exception as e:
+                    print(f"处理元素{i+1}时出错: {e}")
+        
+        except Exception as e:
+            print(f"查找目标元素时出错: {e}")
+
+        # --- 步骤 3: 如果上述方法失败，尝试在整个页面中搜索日期 ---
+        if not updated_text:
+            print("尝试在整个页面中搜索日期...")
+            
+            # 获取整个页面的文本
+            full_text = driver.find_element(By.TAG_NAME, "body").text
+            print(f"页面文本长度: {len(full_text)}")
+            
+            # 查找包含"更新时间"的文本
+            for line in full_text.split('\n'):
+                if "更新" in line or "时间" in line:
+                    print(f"找到时间相关行: {line}")
+                    date_match = extract_date_from_text(line)
+                    if date_match:
+                        updated_text = date_match
+                        print(f"从页面文本中找到日期: {updated_text}")
+                        break
+
+        # --- 步骤 4: 如果仍然没找到，尝试直接查找所有日期格式的文本 ---
+        if not updated_text:
+            print("尝试查找所有日期格式的文本...")
+            all_elements = driver.find_elements(By.XPATH, "//*[contains(text(), '-')]")
+            
+            for element in all_elements[:50]:  # 检查前50个元素
+                text = element.text
+                date_match = extract_date_from_text(text)
+                if date_match and len(date_match) > 8:  # 确保是完整的日期
+                    # 检查这个日期是否在目标软件附近
+                    try:
+                        # 获取父容器，看看是否包含目标软件
+                        parent = element.find_element(By.XPATH, "./ancestor::div[contains(text(), '国新') or contains(text(), '通达信')]")
+                        if parent:
                             updated_text = date_match
-                            print(f"从父元素中找到日期: {updated_text}")
+                            print(f"从附近元素中找到日期: {updated_text}")
                             break
                     except:
                         continue
-            except Exception as e:
-                print(f"查找目标软件时出错: {e}")
 
-        # 如果仍然没找到，标记为未找到
         if not updated_text:
             updated_text = "未找到日期 (Parsed None)"
             print("警告: 未找到日期")
+            
+            # 保存完整的页面源代码用于调试
+            with open("debug_page.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            print("已保存完整页面源代码到 debug_page.html")
 
     except Exception as e:
         print("抓取过程发生异常:", e)
         import traceback
         traceback.print_exc()
         updated_text = f"Error: {str(e)}"
-    
     finally:
-        # 无论如何都保存页面源代码用于调试
-        try:
-            page_source = driver.page_source
-            with open("debug_page.html", "w", encoding="utf-8") as f:
-                f.write(page_source)
-            print(f"已保存页面源代码到 debug_page.html，长度: {len(page_source)} 字符")
-            
-            # 同时保存页面文本用于调试
-            try:
-                page_text = driver.find_element(By.TAG_NAME, "body").text
-                with open("debug_text.txt", "w", encoding="utf-8") as f:
-                    f.write(page_text)
-                print(f"已保存页面文本到 debug_text.txt，长度: {len(page_text)} 字符")
-            except:
-                pass
-        except Exception as e:
-            print(f"保存调试文件时出错: {e}")
-        
         driver.quit()
 
     return updated_text
-    
+
 def read_history():
     if not os.path.exists(HISTORY_FILE):
         return []
