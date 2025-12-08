@@ -1,4 +1,4 @@
-name: Cleanup Pages Build Records
+name: Cleanup Pages Records
 
 on:
   schedule:
@@ -9,98 +9,105 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     permissions:
-      actions: write   # 必须有写入权限才能删除运行记录
+      actions: write       # 删除 workflow runs 需要
+      deployments: write   # 删除 deployments 需要
       contents: read
     steps:
-      - name: Cleanup old pages-build-deployment runs
+      - name: Cleanup old pages-build-deployment runs and github-pages deployments
         uses: actions/github-script@v6
         with:
           script: |
-            console.log('开始清理 pages-build-deployment 运行记录...');
+            console.log('开始清理 Pages 相关记录...');
 
             try {
-              // 1. 获取所有工作流
+              // -------------------------------
+              // 1. 清理 workflow runs
+              // -------------------------------
               console.log('获取仓库工作流列表...');
               const workflows = await github.rest.actions.listRepoWorkflows({
                 owner: context.repo.owner,
                 repo: context.repo.repo
               });
 
-              console.log(`找到 ${workflows.data.total_count} 个工作流`);
-
-              // 2. 找到 pages-build-deployment 工作流
               const pagesWorkflow = workflows.data.workflows.find(
                 wf => wf.name === 'pages-build-deployment' ||
                       wf.name.includes('Pages') ||
                       wf.path.includes('pages')
               );
 
-              if (!pagesWorkflow) {
-                console.log('未找到 pages-build-deployment 工作流，所有工作流如下:');
-                workflows.data.workflows.forEach((wf, i) => {
-                  console.log(`${i + 1}. ${wf.name} (ID: ${wf.id}, 路径: ${wf.path})`);
+              if (pagesWorkflow) {
+                console.log(`找到目标工作流: ${pagesWorkflow.name} (ID: ${pagesWorkflow.id})`);
+
+                const runs = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: pagesWorkflow.id,
+                  per_page: 100
                 });
-                return;
+
+                const runsToKeep = 5;
+                const runsToDelete = runs.data.workflow_runs.slice(runsToKeep);
+
+                console.log(`保留最近 ${runsToKeep} 条运行记录，删除 ${runsToDelete.length} 条`);
+
+                for (let i = 0; i < runsToDelete.length; i++) {
+                  const run = runsToDelete[i];
+                  try {
+                    await github.rest.actions.deleteWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id
+                    });
+                    console.log(`✓ 已删除 workflow run ${run.id}`);
+                  } catch (err) {
+                    console.log(`✗ 删除失败 run ${run.id}: ${err.message}`);
+                  }
+                  if ((i + 1) % 5 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                  }
+                }
+              } else {
+                console.log('未找到 pages-build-deployment 工作流');
               }
 
-              console.log(`找到目标工作流: ${pagesWorkflow.name} (ID: ${pagesWorkflow.id})`);
-
-              // 3. 获取该工作流的运行记录
-              console.log('获取运行记录...');
-              const runs = await github.rest.actions.listWorkflowRuns({
+              // -------------------------------
+              // 2. 清理 deployments
+              // -------------------------------
+              console.log('获取部署记录...');
+              const deployments = await github.rest.repos.listDeployments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                workflow_id: pagesWorkflow.id,
                 per_page: 100
               });
 
-              console.log(`总共找到 ${runs.data.total_count} 条运行记录`);
+              const keep = 5;
+              const toDelete = deployments.data.slice(keep);
 
-              // 4. 保留最近5条，删除其他
-              const runsToKeep = 5;
-              const runsToDelete = runs.data.workflow_runs.slice(runsToKeep);
+              console.log(`保留最近 ${keep} 条部署记录，删除 ${toDelete.length} 条`);
 
-              console.log(`保留最近 ${runsToKeep} 条，删除 ${runsToDelete.length} 条`);
-
-              if (runsToDelete.length === 0) {
-                console.log('没有需要删除的记录');
-                return;
-              }
-
-              // 5. 分批删除（避免API限制）
-              for (let i = 0; i < runsToDelete.length; i++) {
-                const run = runsToDelete[i];
-                const runDate = new Date(run.created_at).toLocaleDateString();
-
-                console.log(`删除记录 ${i + 1}/${runsToDelete.length}: ID=${run.id}, 创建于 ${runDate}`);
-
+              for (let i = 0; i < toDelete.length; i++) {
+                const dep = toDelete[i];
                 try {
-                  await github.rest.actions.deleteWorkflowRun({
+                  await github.rest.repos.deleteDeployment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    run_id: run.id
+                    deployment_id: dep.id
                   });
-                  console.log(`✓ 已删除记录 ${run.id}`);
-                } catch (deleteError) {
-                  console.log(`✗ 删除失败 ${run.id}: ${deleteError.message}`);
+                  console.log(`✓ 已删除部署 ${dep.id}`);
+                } catch (err) {
+                  console.log(`✗ 删除失败 部署 ${dep.id}: ${err.message}`);
                 }
-
                 if ((i + 1) % 5 === 0) {
-                  console.log('暂停1秒避免API限制...');
                   await new Promise(resolve => setTimeout(resolve, 1000));
                 }
               }
 
-              console.log('清理完成！');
+              console.log('所有清理任务完成！');
 
             } catch (error) {
-              console.error('清理过程中发生错误:');
-              console.error('错误信息:', error.message);
-              console.error('状态码:', error.status);
-
+              console.error('清理过程中发生错误:', error.message);
               if (error.response) {
                 console.error('响应数据:', JSON.stringify(error.response.data, null, 2));
               }
-
               throw error;
             }
