@@ -3,7 +3,7 @@ name: daily-crsec
 on:
   schedule:
     - cron: '0 2 * * *'  # 每日 02:00 UTC（可按需修改）
-  workflow_dispatch:
+  workflow_dispatch:     # 允许手动触发
 
 permissions:
   contents: write
@@ -44,6 +44,17 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: |
           python monitor_edge.py
+      
+      - name: Upload debug files
+        if: always()  # 即使脚本失败也上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files
+          path: |
+            page_load.png
+            after_tab_click.png
+            debug_page.html
+          retention-days: 7
 
       - name: Publish to gh-pages (commit index.html & history)
         env:
