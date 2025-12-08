@@ -54,6 +54,7 @@ jobs:
             page_load.png
             after_tab_click.png
             debug_page.html
+            debug_text.txt
           retention-days: 7
 
       - name: Publish to gh-pages (commit index.html & history)
