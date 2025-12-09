@@ -1,4 +1,4 @@
-A tool that sends weekly CRSEC trading software update notifications via email
+This is a dedicated tool that automatically sends weekly CRSEC software update notifications to designated recipients via email.
 
 <p align="center">
 <pre>
