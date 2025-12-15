@@ -56,20 +56,25 @@ jobs:
             debug_page.html
           retention-days: 7
 
-      - name: Publish to gh-pages (commit index.html & history)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save history to main branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 切换或创建 gh-pages 分支
-          git checkout -B gh-pages
-          # 把输出文件重命名为 index.html（GitHub Pages 默认）
-          if [ -f index.html ]; then
-            git add index.html
-          fi
-          if [ -f history.txt ]; then
-            git add history.txt
-          fi
-          git commit -m "Update status: $(date -u +"%Y-%m-%d")" || echo "no changes to commit"
-          git push -u origin gh-pages --force
+          
+          # 添加 history.txt 到暂存区
+          git add history.txt
+          
+          # 尝试提交，如果文件没变化（没有新历史）则跳过
+          git commit -m "Update history data" || echo "No history changes to save"
+          
+          # 推送回 main 分支
+          git push origin main
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          keep_files: false
+          include_files: index.html
