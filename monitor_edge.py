@@ -301,7 +301,7 @@ def build_html(value, history):
         html += f"    <li>{line}</li>\n"
     html += """
   </ul>
-  <p style="font-size:0.8em; color:#666;">由 GitHub Actions 每周自动更新并发布到 GitHub Pages。</p>
+  <p style="font-size:0.8em; color:#666;">由 GitHub Actions 每周自动更新并发布。</p>
 </body>
 </html>
 """
@@ -336,4 +336,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
