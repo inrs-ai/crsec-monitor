@@ -294,10 +294,10 @@ def build_html(value, history):
   <p><strong>抓取时间（UTC）</strong>: {now}</p>
   <p><strong>当前抓取结果</strong>:</p>
   <pre class="latest">{value}</pre>
-  <h3>历史（最近 50 条）</h3>
+  <h3>历史（最近 5 条）</h3>
   <ul>
 """
-    for line in reversed(history[-50:]):
+    for line in reversed(history[-5:]):
         html += f"    <li>{line}</li>\n"
     html += """
   </ul>
@@ -336,5 +336,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
