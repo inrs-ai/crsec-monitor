@@ -326,7 +326,7 @@ def build_email_html(value, now, url):
             </div>
             
             <div style="padding: 30px;">
-                <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">Hello,Jian!</p>
+                <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">Hello,Mr.Jian~~</p>
                 
                 <div style="margin: 25px 0; padding: 20px; background-color: #f8fafc; border-left: 5px solid #3b82f6; border-radius: 4px;">
                     <div style="margin-bottom: 12px;">
@@ -340,7 +340,7 @@ def build_email_html(value, now, url):
                 </div>
 
                 <div style="text-align: center; margin-top: 30px;">
-                    <a href="{url}" style="display: inline-block; padding: 12px 35px; background-color: #3b82f6; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">立即查看更新</a>
+                    <a href="{url}" style="display: inline-block; padding: 12px 35px; background-color: #3b82f6; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">查看更新</a>
                 </div>
             </div>
             
@@ -370,7 +370,7 @@ def main():
         
         if "抓取异常" not in entry:
             # 1. 准备标题
-            subject = "🚀 国新证券软件更新监测通知"
+            subject = "🔭 国新证券软件更新监测通知"
             
             # 2. 准备纯文本内容 (兜底用)
             body_text = f"时间:{now}\n新值:{value}\n来源:\n{URL}"
@@ -390,6 +390,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
