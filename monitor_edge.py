@@ -28,16 +28,22 @@ EMAIL_TO = os.getenv("EMAIL_TO")
 HISTORY_FILE = "history.txt"
 OUTPUT_FILE = "index.html"
 
-def send_email(subject: str, body: str):
+def send_email(subject: str, body_text: str, body_html: str = None):
     if not (SMTP_HOST and SMTP_PORT and SMTP_USER and SMTP_PASS and EMAIL_FROM and EMAIL_TO):
         print("邮件配置不完整，跳过发送邮件")
         return
     try:
         msg = EmailMessage()
-        msg.set_content(body)
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = EMAIL_TO
+        
+        # 设置纯文本内容（作为 HTML 无法显示时的备选）
+        msg.set_content(body_text)
+        
+        # 如果提供了 HTML 内容，则添加它
+        if body_html:
+            msg.add_alternative(body_html, subtype='html')
 
         if SMTP_PORT == 465:
             context = ssl.create_default_context()
@@ -54,7 +60,7 @@ def send_email(subject: str, body: str):
                     pass
                 s.login(SMTP_USER, SMTP_PASS)
                 s.send_message(msg)
-        print("邮件已发送（已调用 SMTP）")
+        print("邮件已发送（包含 HTML 格式）")
     except Exception as e:
         print("发送邮件失败:", e)
 
@@ -294,10 +300,10 @@ def build_html(value, history):
   <p><strong>抓取时间（UTC）</strong>: {now}</p>
   <p><strong>当前抓取结果</strong>:</p>
   <pre class="latest">{value}</pre>
-  <h3>历史（最近 5 条）</h3>
+  <h3>历史（最近 10 条）</h3>
   <ul>
 """
-    for line in reversed(history[-5:]):
+    for line in reversed(history[-10:]):
         html += f"    <li>{line}</li>\n"
     html += """
   </ul>
@@ -306,6 +312,46 @@ def build_html(value, history):
 </html>
 """
     return html
+
+def build_email_html(value, now, url):
+    # 提取域名称作为显示参考
+    domain = url.split('/')[2] if '://' in url else "查看详情"
+    
+    return f"""
+    <div style="background-color: #f4f7f9; padding: 30px 15px; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="max-width: 550px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e8ed;">
+            
+            <div style="background: linear-gradient(90deg, #3b82f6, #2563eb); padding: 20px; text-align: center;">
+                <h2 style="margin: 0; color: #ffffff; font-size: 20px; letter-spacing: 1px;">🚀 国新证券软件更新监测通知</h2>
+            </div>
+            
+            <div style="padding: 30px;">
+                <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">Hello,Jian!</p>
+                
+                <div style="margin: 25px 0; padding: 20px; background-color: #f8fafc; border-left: 5px solid #3b82f6; border-radius: 4px;">
+                    <div style="margin-bottom: 12px;">
+                        <span style="display: block; color: #64748b; font-size: 12px; text-transform: uppercase; font-weight: bold;">最新变动</span>
+                        <span style="color: #1e293b; font-size: 18px; font-weight: 600;">{value}</span>
+                    </div>
+                    <div>
+                        <span style="display: block; color: #64748b; font-size: 12px; text-transform: uppercase; font-weight: bold;">检测时间</span>
+                        <span style="color: #1e293b; font-size: 14px;">{now}</span>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="{url}" style="display: inline-block; padding: 12px 35px; background-color: #3b82f6; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">立即查看更新</a>
+                </div>
+            </div>
+            
+            <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
+                <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+                    数据来源: <span style="color: #64748b;">{domain}</span>
+                </p>
+            </div>
+        </div>
+    </div>
+    """
 
 def main():
     value = fetch_once()
@@ -319,13 +365,21 @@ def main():
     history = read_history()
     last = history[-1] if history else None
     
-    # 简单的去重与通知逻辑
     if last != entry:
         append_history(entry)
+        
         if "抓取异常" not in entry:
-            subject = "国新证券软件下载 更新时间变更"
-            body = f"检测到变更\n时间: {now}\n新值: {value}\n来源: {URL}"
-            send_email(subject, body)
+            # 1. 准备标题
+            subject = "🚀 国新证券软件更新监测通知"
+            
+            # 2. 准备纯文本内容 (兜底用)
+            body_text = f"时间:{now}\n新值:{value}\n来源:\n{URL}"
+            
+            # 3. 准备漂亮 HTML 内容 (调用封装好的函数)
+            body_html = build_email_html(value, now, URL)
+            
+            # 4. 发送邮件
+            send_email(subject, body_text, body_html)
     
     # 重新读取用于生成 HTML
     history = read_history()
@@ -336,6 +390,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
