@@ -13,6 +13,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formataddr
 
 URL = "https://www.crsec.com.cn/link/download.html"
 TARGET = "国新证券通达信行情交易软件"
@@ -35,7 +36,7 @@ def send_email(subject: str, body_text: str, body_html: str = None):
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM
+        msg["From"] = formataddr(("Message Alert", EMAIL_FROM))
         msg["To"] = EMAIL_TO
         
         # 设置纯文本内容（作为 HTML 无法显示时的备选）
@@ -390,6 +391,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
