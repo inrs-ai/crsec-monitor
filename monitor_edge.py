@@ -36,7 +36,7 @@ def send_email(subject: str, body_text: str, body_html: str = None):
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = formataddr(("Message Alert", EMAIL_FROM))
+        msg["From"] = formataddr(("Notification", EMAIL_FROM))
         msg["To"] = EMAIL_TO
         
         # 设置纯文本内容（作为 HTML 无法显示时的备选）
@@ -391,6 +391,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
