@@ -78,6 +78,7 @@ async def fetch_once():
         print(f"正在访问: {URL}")
         # 启动无头浏览器 (Ubuntu-latest 自带 Chrome，nodriver 会自动寻址)
         browser = await uc.start(
+            browser_executable_path="/usr/bin/google-chrome",
             headless=True,
             no_sandbox=True,  # <--- 必须显式传递这个参数
             browser_args=["--disable-gpu", "--window-size=1920,1080"]
