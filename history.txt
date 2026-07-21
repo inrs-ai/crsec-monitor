@@ -35,3 +35,10 @@
 2026-07-18 04:50:53 UTC — 2026-07-06
 2026-07-21 07:51:54 UTC — 2026-07-06
 2026-07-21 09:24:31 UTC — [抓取异常] Error: Object of type Element is not JSON serializable
+2026-07-21 10:19:34 UTC — [抓取异常] Error: 
+                ---------------------
+                Failed to connect to browser
+                ---------------------
+                One of the causes could be when you are running as root.
+                In that case you need to pass no_sandbox=True 
+                
