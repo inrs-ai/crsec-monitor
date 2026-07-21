@@ -2,37 +2,27 @@ name: weekly-crsec
 
 on:
   schedule:
-    - cron: '0 2 * * 6'  # UTC（可按需修改）
+    - cron: '0 2 * * 6'  # UTC 时间，每周六 02:00
   workflow_dispatch:     # 允许手动触发
 
 permissions:
-  contents: write
+  contents: write        # 允许提交 history.txt 到主分支
+  pages: write           # 允许部署到 GitHub Pages
+  id-token: write        # GitHub Pages 部署所需的身份验证
 
 jobs:
-  run:
+  run-and-deploy:
     runs-on: ubuntu-latest
+    container:
+      image: cimg/python:3.13-browsers
+      options: --user root  # 使用 root 避免 GitHub Actions checkout 时的权限问题
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          persist-credentials: true
-
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.14'
-
-      - name: Install Microsoft Edge (stable)
-        run: |
-          sudo apt update
-          sudo apt install -y wget gnupg apt-transport-https ca-certificates
-          wget -q -O - https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge.list'
-          sudo apt update
-          sudo apt install -y microsoft-edge-stable
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install nodriver
 
       - name: Run monitor script
         env:
@@ -42,39 +32,36 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
-        run: |
-          python monitor_edge.py
+        run: python main.py
       
       - name: Upload debug files
-        if: always()  # 即使脚本失败也上传
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
           name: debug-files
           path: |
             page_load.png
             after_tab_click.png
             debug_page.html
-          retention-days: 7
+          retention-days: 3
 
       - name: Save history to main branch
         run: |
+          git config --global --add safe.directory /__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 添加 history.txt 到暂存区
-          git add history.txt
-          
-          # 尝试提交，如果文件没变化（没有新历史）则跳过
+          git add history.txt       
           git commit -m "Update history data" || echo "No history changes to save"
-          
-          # 推送回 main 分支
           git push origin main
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          publish_branch: gh-pages
-          keep_files: false
-          include_files: index.html
+          path: './public'  # script 会把 index.html 生成到这个目录
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
