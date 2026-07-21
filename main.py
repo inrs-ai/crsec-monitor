@@ -79,7 +79,8 @@ async def fetch_once():
         # 启动无头浏览器 (Ubuntu-latest 自带 Chrome，nodriver 会自动寻址)
         browser = await uc.start(
             headless=True,
-            browser_args=["--no-sandbox", "--disable-gpu", "--window-size=1920,1080"]
+            no_sandbox=True,  # <--- 必须显式传递这个参数
+            browser_args=["--disable-gpu", "--window-size=1920,1080"]
         )
         
         page = await browser.get(URL)
