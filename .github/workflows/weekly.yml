@@ -2,7 +2,7 @@ name: weekly-crsec
 
 on:
   schedule:
-    - cron: '0 2 * * 6'  # UTC 时间，每周六 02:00
+    - cron: '0 2 * * 6'  # UTC（每周六02:00）
   workflow_dispatch:     # 允许手动触发
 
 permissions:
@@ -12,19 +12,20 @@ permissions:
 
 jobs:
   run-and-deploy:
-    runs-on: ubuntu-latest
-    container:
-      image: cimg/python:3.13-browsers
-      options: --user root  # 使用 root 避免 GitHub Actions checkout 时的权限问题
-
+    runs-on: ubuntu-latest  # 自带 Chrome
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
       - name: Install dependencies
-        run: |
-         pip install --upgrade pip
-         pip install nodriver
+        # 安装 nodriver 和 bs4，无需手动安装浏览器
+        run: pip install nodriver beautifulsoup4
 
       - name: Run monitor script
         env:
@@ -49,7 +50,6 @@ jobs:
 
       - name: Save history to main branch
         run: |
-          git config --global --add safe.directory /__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add history.txt       
