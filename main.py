@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 from datetime import datetime, UTC
-import nodriver as uc
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 import smtplib
 import ssl
@@ -38,8 +38,8 @@ def send_email(subject: str, body_text: str, body_html: str = None):
         if body_html:
             msg.add_alternative(body_html, subtype='html')
 
+        context = ssl.create_default_context()
         if SMTP_PORT == 465:
-            context = ssl.create_default_context()
             with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=30) as s:
                 s.login(SMTP_USER, SMTP_PASS)
                 s.send_message(msg)
@@ -47,7 +47,7 @@ def send_email(subject: str, body_text: str, body_html: str = None):
             with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
                 s.ehlo()
                 try:
-                    s.starttls(context=ssl.create_default_context())
+                    s.starttls(context=context)
                     s.ehlo()
                 except Exception:
                     pass
@@ -73,74 +73,74 @@ def extract_date_from_text(text):
 
 async def fetch_once():
     updated_text = None
-    browser = None
     try:
-        print(f"正在访问: {URL}")
-        # 启动无头浏览器 (Ubuntu-latest 自带 Chrome，nodriver 会自动寻址)
-        browser = await uc.start(
-            browser_executable_path="/usr/bin/google-chrome",
-            headless=True,
-            no_sandbox=True,  # <--- 必须显式传递这个参数
-            browser_args=["--disable-gpu", "--window-size=1920,1080"]
-        )
-        
-        page = await browser.get(URL)
-        await asyncio.sleep(4)  # 等待 Vue 页面初始渲染
-        await page.save_screenshot("page_load.png")
+        print(f"正在启动 Playwright 访问: {URL}")
+        async with async_playwright() as p:
+            # 加上 --no-sandbox 确保在 Linux 容器中能稳妥启动
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu"]
+            )
+            page = await browser.new_page(viewport={"width": 1920, "height": 1080})
+            
+            # 访问网页
+            await page.goto(URL, wait_until="domcontentloaded")
+            await page.wait_for_timeout(4000)  # 等待 Vue 组件挂载
+            await page.screenshot(path="page_load.png")
 
-        # 找到并点击 "电脑版" 标签
-        tabs = await page.find_all("电脑版")
-        for tab in tabs:
+            # 找到并点击 "电脑版" 标签 (Playwright 提供了非常方便的文本定位)
             try:
-                await tab.click()
-                print("已点击电脑版标签")
-                break
-            except:
-                pass
-                
-        await asyncio.sleep(2)  # 等待列表数据刷新
-        await page.save_screenshot("after_tab_click.png")
+                tab = page.locator("text='电脑版'").first
+                if await tab.count() > 0:
+                    await tab.click()
+                    print("已点击 '电脑版' 标签")
+            except Exception as e:
+                print(f"点击标签失败: {e}")
 
-        # 获取渲染后的完整 HTML 交给 BeautifulSoup 分析（更稳定、不涉及复杂的 DOM evaluate）
-        html_content = await page.get_content()
-        soup = BeautifulSoup(html_content, "html.parser")
-        
-        with open("debug_page.html", "w", encoding="utf-8") as f:
-            f.write(html_content)
+            await page.wait_for_timeout(2000)  # 等待列表数据刷新
+            await page.screenshot(path="after_tab_click.png")
 
-        print(f"正在解析 HTML 查找: {TARGET}")
-        
-        # 策略 1: 遍历所有的表格行 <tr>，由于结构通常在表格中
-        for tr in soup.find_all("tr"):
-            text = tr.get_text(" ", strip=True)
-            if TARGET in text or ("国新证券" in text and "通达信" in text):
-                date_match = extract_date_from_text(text)
-                if date_match:
-                    updated_text = date_match
-                    print(f"在表格行中找到日期: {updated_text}")
-                    break
-        
-        # 策略 2: Fallback 如果没在 tr 中找到，暴力搜索全文每一行
-        if not updated_text:
-            body_text = soup.body.get_text("\n", strip=True) if soup.body else ""
-            for line in body_text.split('\n'):
-                if TARGET in line or "通达信" in line:
-                    date_match = extract_date_from_text(line)
+            # 获取渲染后的完整 HTML
+            html_content = await page.content()
+            await browser.close()
+            
+            with open("debug_page.html", "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            # 交给 BeautifulSoup 分析
+            print(f"正在解析 HTML 查找: {TARGET}")
+            soup = BeautifulSoup(html_content, "html.parser")
+            
+            # 策略 1: 遍历表格行 <tr>
+            for tr in soup.find_all("tr"):
+                text = tr.get_text(" ", strip=True)
+                if TARGET in text or ("国新证券" in text and "通达信" in text):
+                    date_match = extract_date_from_text(text)
                     if date_match:
                         updated_text = date_match
-                        print(f"在文本行中找到日期: {updated_text}")
+                        print(f"在表格行中找到日期: {updated_text}")
                         break
+            
+            # 策略 2: 暴力搜索全文
+            if not updated_text:
+                body_text = soup.body.get_text("\n", strip=True) if soup.body else ""
+                for line in body_text.split('\n'):
+                    if TARGET in line or "通达信" in line:
+                        date_match = extract_date_from_text(line)
+                        if date_match:
+                            updated_text = date_match
+                            print(f"在文本行中找到日期: {updated_text}")
+                            break
 
-        if not updated_text:
-            updated_text = "未找到日期 (Parsed None)"
-            print("警告: 页面中未能解析出日期")
+            if not updated_text:
+                updated_text = "未找到日期 (Parsed None)"
+                print("警告: 页面中未能解析出日期")
 
     except Exception as e:
-        print(f"抓取过程发生异常: {e}")
+        print("抓取过程发生异常:")
+        import traceback
+        traceback.print_exc()
         updated_text = f"Error: {str(e)}"
-    finally:
-        if browser:
-            browser.stop()
 
     return updated_text
 
@@ -155,7 +155,6 @@ def append_history(entry):
         f.write(entry + "\n")
 
 def build_html(value, history):
-    # 使用 Python 3.13 推荐的时间格式
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     html = f"""<!doctype html>
 <html>
@@ -237,7 +236,6 @@ async def main():
             body_html = build_email_html(value, now, URL)
             send_email(subject, body_text, body_html)
     
-    # 构建 HTML 页面用于 GitHub Pages 发布
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     history = read_history()
     html = build_html(value, history)
