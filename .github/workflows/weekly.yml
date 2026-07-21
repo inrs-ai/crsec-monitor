@@ -2,14 +2,12 @@ name: weekly-crsec
 
 on:
   schedule:
-    - cron: '0 2 * * 6'  # UTC（每周六02:00）
-  workflow_dispatch:     # 允许手动触发
-
+    - cron: '0 2 * * 6'
+  workflow_dispatch:
 permissions:
-  contents: write        # 允许提交 history.txt 到主分支
-  pages: write           # 允许部署到 GitHub Pages
-  id-token: write        # GitHub Pages 部署所需的身份验证
-
+  contents: write
+  pages: write
+  id-token: write
 jobs:
   run-and-deploy:
     runs-on: ubuntu-latest
@@ -22,17 +20,23 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Show Chrome
-        run: |
-         which google-chrome || true
-         which chromium || true
-         google-chrome --version || true
+      - name: Install Python dependencies
+        run: pip install playwright beautifulsoup4 lxml
 
-      - name: Install dependencies
-        run: |
-         python -m pip install --upgrade pip
-         pip install playwright beautifulsoup4
-         playwright install chromium
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "PLAYWRIGHT_VERSION=$(pip show playwright | grep Version | awk '{print $2}')" >> $GITHUB_ENV
+
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium
 
       - name: Run monitor script
         env:
@@ -43,17 +47,6 @@ jobs:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: python main.py
-      
-      - name: Upload debug files
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: debug-files
-          path: |
-            page_load.png
-            after_tab_click.png
-            debug_page.html
-          retention-days: 3
 
       - name: Save history to main branch
         run: |
@@ -64,12 +57,12 @@ jobs:
           git push origin main
 
       - name: Setup Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@v7
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@v6
         with:
-          path: './public'  # script 会把 index.html 生成到这个目录
+          path: './public'
 
       - name: Deploy to GitHub Pages
         id: deployment
