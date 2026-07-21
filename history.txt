@@ -56,3 +56,10 @@
                 One of the causes could be when you are running as root.
                 In that case you need to pass no_sandbox=True 
                 
+2026-07-21 10:39:57 UTC — [抓取异常] Error: 
+                ---------------------
+                Failed to connect to browser
+                ---------------------
+                One of the causes could be when you are running as root.
+                In that case you need to pass no_sandbox=True 
+                
