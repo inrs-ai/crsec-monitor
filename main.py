@@ -61,6 +61,7 @@ def extract_date_from_text(text):
     """从任意文本中提取并格式化日期"""
     if not text:
         return None
+    # 匹配 YYYY-MM-DD 或 YYYY/MM/DD 或 YYYY年MM月DD日
     date_pattern = r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}"
     dates = re.findall(date_pattern, text)
     if dates:
@@ -71,66 +72,86 @@ def extract_date_from_text(text):
         return date_str
     return None
 
+def parse_target_date(html_content):
+    """使用 BeautifulSoup 和 lxml 精准提取日期"""
+    soup = BeautifulSoup(html_content, "lxml")
+    
+    # 策略 1: 定位包含目标文字的节点，向上追溯其父节点提取日期
+    target_keywords = [TARGET, "国新证券通达信", "通达信行情交易软件"]
+    for keyword in target_keywords:
+        # 使用正则模糊匹配包含关键字的文本节点
+        elements = soup.find_all(string=re.compile(keyword))
+        for el in elements:
+            # 向上查找最近的行容器 (通常是 tr 或 li 或 div)
+            container = el.find_parent(['tr', 'li', 'div'])
+            # 尝试向上最多溯源 3 层以包含日期列
+            for _ in range(3):
+                if container:
+                    text = container.get_text(" ", strip=True)
+                    date_match = extract_date_from_text(text)
+                    if date_match:
+                        print(f"通过节点追溯找到日期: {date_match}")
+                        return date_match
+                    container = container.parent
+
+    # 策略 2: 降级方案，遍历所有的表格行和列表行
+    for tag in soup.find_all(['tr', 'li']):
+        text = tag.get_text(" ", strip=True)
+        if TARGET in text or ("国新证券" in text and "通达信" in text):
+            date_match = extract_date_from_text(text)
+            if date_match:
+                print(f"通过遍历 <tr>/<li> 找到日期: {date_match}")
+                return date_match
+
+    # 策略 3: 暴力匹配，逐行检查全文
+    body_text = soup.body.get_text("\n", strip=True) if soup.body else ""
+    for line in body_text.split('\n'):
+        if TARGET in line or "通达信" in line:
+            date_match = extract_date_from_text(line)
+            if date_match:
+                print(f"通过全文逐行扫描找到日期: {date_match}")
+                return date_match
+                
+    return None
+
 async def fetch_once():
     updated_text = None
     try:
         print(f"正在启动 Playwright 访问: {URL}")
         async with async_playwright() as p:
-            # 加上 --no-sandbox 确保在 Linux 容器中能稳妥启动
             browser = await p.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-gpu"]
             )
             page = await browser.new_page(viewport={"width": 1920, "height": 1080})
             
-            # 访问网页
-            await page.goto(URL, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000)  # 等待 Vue 组件挂载
-            await page.screenshot(path="page_load.png")
-
-            # 找到并点击 "电脑版" 标签 (Playwright 提供了非常方便的文本定位)
+            # 使用 networkidle 确保 Vue 的异步请求都已完成
+            await page.goto(URL, wait_until="networkidle")
+            
+            # 尝试点击“电脑版”标签 (使用通配选择器确保命中)
             try:
                 tab = page.locator("text='电脑版'").first
-                if await tab.count() > 0:
-                    await tab.click()
+                if await tab.is_visible():
+                    await tab.click(force=True)
                     print("已点击 '电脑版' 标签")
-            except Exception as e:
-                print(f"点击标签失败: {e}")
+            except Exception:
+                print("未找到或无需点击 '电脑版' 标签")
 
-            await page.wait_for_timeout(2000)  # 等待列表数据刷新
-            await page.screenshot(path="after_tab_click.png")
+            # 等待目标软件的名称出现在 DOM 中，最长等 5 秒
+            try:
+                await page.wait_for_selector(f"text={TARGET}", timeout=5000)
+            except Exception:
+                # 兜底等待 3 秒，以防文本被截断或存在空格导致精确选择器失效
+                await page.wait_for_timeout(3000)
 
-            # 获取渲染后的完整 HTML
+            # 获取最终渲染后的 HTML 交给 BeautifulSoup
             html_content = await page.content()
             await browser.close()
             
-            with open("debug_page.html", "w", encoding="utf-8") as f:
-                f.write(html_content)
-
-            # 交给 BeautifulSoup 分析
-            print(f"正在解析 HTML 查找: {TARGET}")
-            soup = BeautifulSoup(html_content, "html.parser")
+            print(f"正在使用 lxml 解析 HTML 查找: {TARGET}")
             
-            # 策略 1: 遍历表格行 <tr>
-            for tr in soup.find_all("tr"):
-                text = tr.get_text(" ", strip=True)
-                if TARGET in text or ("国新证券" in text and "通达信" in text):
-                    date_match = extract_date_from_text(text)
-                    if date_match:
-                        updated_text = date_match
-                        print(f"在表格行中找到日期: {updated_text}")
-                        break
-            
-            # 策略 2: 暴力搜索全文
-            if not updated_text:
-                body_text = soup.body.get_text("\n", strip=True) if soup.body else ""
-                for line in body_text.split('\n'):
-                    if TARGET in line or "通达信" in line:
-                        date_match = extract_date_from_text(line)
-                        if date_match:
-                            updated_text = date_match
-                            print(f"在文本行中找到日期: {updated_text}")
-                            break
+            # 调用封装好的解析函数
+            updated_text = parse_target_date(html_content)
 
             if not updated_text:
                 updated_text = "未找到日期 (Parsed None)"
